@@ -69,6 +69,14 @@ export interface IBoxerStageOptions<LABEL extends string> {
    * @default ''
    */
   defaultLabel?: LABEL;
+  /**
+   * @default 0.1
+   */
+  minZoom?: number;
+  /**
+   * @default 3
+   */
+  maxZoom?: number;
 }
 
 export abstract class BoxerEventEmitter<LABEL extends string> extends EventEmitter2 {
@@ -115,6 +123,8 @@ export abstract class BoxerStageCore<LABEL extends string> extends BoxerEventEmi
       boxWidth:            options.boxWidth && options.boxWidth > 0 ? options.boxWidth : 2,
       eventEmitterOptions: options.eventEmitterOptions || {},
       defaultLabel:        options.defaultLabel || '' as LABEL,
+      minZoom:             options.minZoom || 0.1,
+      maxZoom:             options.maxZoom || 3,
     };
 
     this.backgroundLayer = new Konva.Layer({
@@ -345,16 +355,17 @@ export abstract class BoxerStageCore<LABEL extends string> extends BoxerEventEmi
   }
 
   public zoom(percent: number, at?: Konva.Vector2d): void {
-    percent = percent < 0.5 ? 0.5 : (percent > 3 ? 3 : percent);
+    percent = Math.min(Math.max(percent, this.options.minZoom), this.options.maxZoom);
+    const zoomDiff = percent - this.getZoom();
     this.backgroundLayer.scale({ x: percent, y: percent });
     this.boxesLayer.scale({ x: percent, y: percent });
     if (at) {
-      const offset: Konva.Vector2d = { x: this.backgroundLayer.x() - at.x, y: this.backgroundLayer.y() - at.y };
-      console.log(offset);
-      // this.moveDelta({
-      //   x: offset.x * percent,
-      //   y: offset.y * percent,
-      // })
+      const pos = this.backgroundLayer.position();
+      const offset: Konva.Vector2d = { x: at.x - pos.x, y: at.y - pos.y };
+      this.moveDelta({
+        x: -offset.x * zoomDiff,
+        y: -offset.y * zoomDiff,
+      });
     }
   }
 

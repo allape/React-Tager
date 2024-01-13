@@ -9,7 +9,7 @@ module.exports = {
   extends: [
     'eslint:recommended', 'plugin:@typescript-eslint/recommended', 'plugin:react-hooks/recommended',
   ],
-  ignorePatterns: ['dist'],
+  ignorePatterns: ['dist', 'docs'],
   parser:         '@typescript-eslint/parser',
   plugins:        ['react-refresh'],
   rules:          {

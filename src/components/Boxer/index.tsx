@@ -19,7 +19,7 @@ export const DEFAULT_LABEL = 'unknown';
 
 export default function Boxer<LABEL extends string = string>({
   labels,
-  width = 640,
+  width = 960,
   height = 480,
   controls,
   className,
@@ -50,7 +50,7 @@ export default function Boxer<LABEL extends string = string>({
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-expect-error
     window.__boxStage = stage;
-    stage.setBackGroundImage('http://127.0.0.1:3001/R-C.gif').then();
+    // stage.setBackGroundImage('http://127.0.0.1:3001/demo.png').then();
 
     stageRef.current = stage;
 
