@@ -1,31 +1,35 @@
 import { DeleteOutlined } from '@ant-design/icons';
-import { Button, InputNumber, Table } from 'antd';
+import { Button, InputNumber, Select, Table, TableProps } from 'antd';
 import { ColumnsType } from 'antd/lib/table';
 import cls from 'classnames';
 import { debounce } from 'lodash';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import BoxerStage, { ClientRect, IBox } from '../../core/BoxerStage.ts';
+import BoxerStage, { ClientRect, IBox, ILayerEvent } from '../../core/BoxerStage.ts';
 import styles from './style.module.scss';
 
-export interface IBoxerProps {
+export interface IBoxerProps<LABEL> {
   className?: string;
+  labels: LABEL[];
   width?: number;
   height?: number;
   controls?: boolean;
 }
 
-export interface IBoxFormItem extends Pick<IBox, 'x' | 'y' | 'width' | 'height' | '_id'> {
+export const DEFAULT_LABEL = 'unknown';
 
-}
+export default function Boxer<LABEL extends string = string>({
+  labels,
+  width = 640,
+  height = 480,
+  controls,
+  className,
+}: IBoxerProps<LABEL>): React.ReactElement {
+  const wrapperId = useMemo(() => `BoxWrapper_${Date.now()}_${Math.floor(Math.random() * 10000)}`, []);
+  const stageRef = useRef<BoxerStage<LABEL> | null>(null);
 
-export interface IBoxForm {
-  boxes: IBoxFormItem[];
-}
+  const [fileOverDropZone, setFileOverDropZone] = useState<boolean>(false);
 
-export default function Boxer({ width = 640, height = 480, controls, className }: IBoxerProps): React.ReactElement {
-  const stageRef = useRef<BoxerStage | null>(null);
-
-  const [boxes, setBoxes] = useState<IBox[]>([]);
+  const [boxes, setBoxes] = useState<IBox<LABEL>[]>([]);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -33,8 +37,8 @@ export default function Boxer({ width = 640, height = 480, controls, className }
       return undefined;
     }
 
-    const stage = new BoxerStage({
-      container, width, height,
+    const stage = new BoxerStage<LABEL>({
+      container, width, height, defaultLabel: DEFAULT_LABEL as LABEL,
     });
     stage.on('change', debounce(() => {
       setBoxes([...stage.getBoxes()].sort((a, b) => a._id - b._id));
@@ -52,10 +56,19 @@ export default function Boxer({ width = 640, height = 480, controls, className }
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       switch (e.key) {
-      case 'Tab':
+      case 'Tab': {
         e.preventDefault();
-        stage.highlightNextBox();
+        const nextBox = stage.highlightNext();
+        if (nextBox) {
+          const row = window.document.querySelector(`#${wrapperId} [data-row-key="` + nextBox._id + '"]');
+          row?.scrollIntoView({
+            behavior: 'smooth',
+            block:    'center',
+            inline:   'center',
+          });
+        }
         break;
+      }
       case 'Delete':
       case 'Backspace': {
         e.preventDefault();
@@ -63,7 +76,7 @@ export default function Boxer({ width = 640, height = 480, controls, className }
         if (!box) {
           break;
         }
-        stage.highlightNextBox();
+        stage.highlightNext();
         box.dispose();
         break;
       }
@@ -95,11 +108,14 @@ export default function Boxer({ width = 640, height = 480, controls, className }
     };
     container.addEventListener('keydown', handleKeyDown);
 
-    const handleWheel = (e: WheelEvent): void => {
+    const handleWheel = (e: WheelEvent & Partial<ILayerEvent>): void => {
+      e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
+        let scale = stage.getZoom();
+        scale = scale - e.deltaY / 100;
+        stage.zoom(scale, { x: e.layerX || 0, y: e.layerY || 0 });
         return;
       }
-      e.preventDefault();
       stage.moveDelta({ x: -e.deltaX, y: -e.deltaY });
     };
     container.addEventListener('wheel', handleWheel);
@@ -112,7 +128,7 @@ export default function Boxer({ width = 640, height = 480, controls, className }
       container.removeEventListener('keydown', handleKeyDown);
       container.removeEventListener('wheel', handleWheel);
     };
-  }, [container, height, width]);
+  }, [container, height, width, wrapperId]);
 
   const handleOnFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = e.target.files;
@@ -124,15 +140,28 @@ export default function Boxer({ width = 640, height = 480, controls, className }
     e.target.value = '';
   };
 
-  const columns: ColumnsType<IBox> = useMemo(() => {
-    const handleChange = (box: IBox, attr: keyof ClientRect, value: number): void => {
+  const columns: ColumnsType<IBox<LABEL>> = useMemo(() => {
+    const handleChange = (box: IBox<LABEL>, attr: keyof ClientRect, value: number): void => {
       box.setAttr(attr, value);
       box.normalize();
+    };
+    const handleLabelChange = (box: IBox<LABEL>, label: LABEL) => {
+      box.label = label;
+      stageRef.current?.setDefaultLabel(label);
     };
     return [
       {
         title:     'id',
         dataIndex: '_id',
+      },
+      {
+        title:     'label',
+        dataIndex: 'label',
+        render:    (_, box) => {
+          return <Select<LABEL> options={labels.map(label => ({ label, value: label }))} value={box.label as LABEL}
+            allowClear showSearch
+            onChange={value => handleLabelChange(box, value)}/>;
+        },
       },
       {
         title:     'x',
@@ -179,24 +208,65 @@ export default function Boxer({ width = 640, height = 480, controls, className }
         },
       },
     ];
+  }, [labels]);
+
+  // DND
+  useEffect(() => {
+    const handleDropEnter = (e: DragEvent) => {
+      e.preventDefault();
+      setFileOverDropZone(true);
+    };
+    const handleDropLeave = (e: DragEvent) => {
+      e.preventDefault();
+      setFileOverDropZone(false);
+    };
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setFileOverDropZone(false);
+
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) {
+        return;
+      }
+      stageRef.current?.setBackGroundImage(window.URL.createObjectURL(file));
+    };
+
+    window.addEventListener('dragenter', handleDropEnter, true);
+    window.addEventListener('dragover', handleDropEnter, true);
+    window.addEventListener('dragleave', handleDropLeave, true);
+    window.addEventListener('drop', handleDrop, true);
+    return () => {
+      window.removeEventListener('dragenter', handleDropEnter, true);
+      window.removeEventListener('dragover', handleDropEnter, true);
+      window.removeEventListener('dragleave', handleDropLeave, true);
+      window.removeEventListener('drop', handleDrop, true);
+    };
   }, []);
 
   const topBox = stageRef.current?.getTopBox();
 
-  return <div className={styles.wrapper}>
-    <div className={styles.canvas}>
+  const rowSelection: TableProps<IBox<LABEL>>['rowSelection'] = {
+    hideSelectAll:   true,
+    type:            'radio',
+    selectedRowKeys: topBox?._id ? [topBox?._id] : [],
+    onChange:        (_, rows) => rows[0]?.highlight(),
+  };
+
+  const scroll: TableProps<IBox<LABEL>>['scroll'] = useMemo(() => ({ y: height - 53 }), [height]);
+
+  const onRow: TableProps<IBox<LABEL>>['onRow'] = useMemo(() => box => ({
+    onClick: () => box.highlight(),
+  }), []);
+
+  return <div id={wrapperId} className={styles.wrapper}>
+    <div className={cls(styles.canvas, fileOverDropZone && styles.dnd)}>
       <input type="file" onChange={handleOnFileChange}/>
       <div className={cls(styles.container, className)} tabIndex={0} ref={setContainer}/>
     </div>
     {controls &&
-        <Table className={styles.controls} scroll={{ y: height - 53 }} rowSelection={{
-          hideSelectAll:   true,
-          type:            'radio',
-          selectedRowKeys: topBox?._id ? [topBox?._id] : [],
-          onChange:        (_, rows) => rows[0]?.move2Top(),
-        }} rowKey="_id" columns={columns} dataSource={boxes} pagination={false} onRow={box => ({
-          onClick: box.move2Top,
-        })}/>
+        <Table<IBox<LABEL>> className={styles.controls} rowKey="_id" columns={columns} dataSource={boxes}
+          scroll={scroll} rowSelection={rowSelection}
+          pagination={false} onRow={onRow}/>
     }
   </div>;
 }
