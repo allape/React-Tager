@@ -1,0 +1,18 @@
+
+.wrapper {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  width: 100%;
+  .canvas {
+    .container {
+      border: 1px solid red;
+    }
+  }
+  .controls {
+    margin-top: 25px;
+    flex: 1;
+  }
+}
