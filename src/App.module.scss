@@ -2,4 +2,7 @@
 .wrapper {
   display: flex;
   flex-direction: column;
+  .config {
+    padding-bottom: 10px;
+  }
 }

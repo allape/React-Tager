@@ -3,34 +3,94 @@ import { Button, InputNumber, Select, Table, TableProps } from 'antd';
 import { ColumnsType } from 'antd/lib/table';
 import cls from 'classnames';
 import { debounce } from 'lodash';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BoxerStage, { ClientRect, IBox, ILayerEvent } from '../../core/BoxerStage.ts';
+import KeysDescription from './KeysDescription.tsx';
 import styles from './style.module.scss';
 
-export interface IBoxerProps<LABEL> {
+export interface IBoxerProps<LABEL extends string> {
   className?: string;
   labels: LABEL[];
+  defaultLabel: LABEL;
   width?: number;
   height?: number;
   controls?: boolean;
+  imageURL?: string;
+  /**
+   * Description of keyboard and mouse controls
+   */
+  keysDescriptionVisible?: boolean;
+  /**
+   * Show file select or not
+   */
+  fileInputVisible?: boolean;
+  /**
+   * DND = Drag and Drop
+   */
+  allowDND?: boolean;
+  allowKeyboard?: boolean;
+  allowMouseWheel?: boolean;
+  onChange?: (boxes: IBox<LABEL>[]) => void;
+  onImageNameChange?: (imageName?: string) => void;
 }
-
-export const DEFAULT_LABEL = 'unknown';
 
 export default function Boxer<LABEL extends string = string>({
   labels,
-  width = 960,
-  height = 480,
+  defaultLabel,
+  width = 500,
+  height = 500,
   controls,
   className,
+  imageURL,
+  keysDescriptionVisible,
+  fileInputVisible,
+  allowDND,
+  allowKeyboard,
+  allowMouseWheel,
+  onChange,
+  onImageNameChange,
 }: IBoxerProps<LABEL>): React.ReactElement {
   const wrapperId = useMemo(() => `BoxWrapper_${Date.now()}_${Math.floor(Math.random() * 10000)}`, []);
+
+  const imageURLRef = useRef<string | undefined>(imageURL);
   const stageRef = useRef<BoxerStage<LABEL> | null>(null);
 
   const [fileOverDropZone, setFileOverDropZone] = useState<boolean>(false);
 
-  const [boxes, setBoxes] = useState<IBox<LABEL>[]>([]);
+  const [boxes, _setBoxes] = useState<IBox<LABEL>[]>([]);
+  const setBoxes = useCallback((valueOrFunc: IBox<LABEL>[] | ((oldValue: IBox<LABEL>[]) => IBox<LABEL>[])) => {
+    _setBoxes(oldValues => {
+      const newBoxes = valueOrFunc instanceof Function ? valueOrFunc(oldValues) : valueOrFunc;
+      onChange?.(newBoxes);
+      return newBoxes;
+    });
+  }, [onChange]);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
+
+  const setBackgroundImage = useCallback((imageURL: string, imageName?: string) => {
+    if (imageName) {
+      onImageNameChange?.(imageName);
+    }  else {
+      try {
+        const url = new URL(imageURL);
+        onImageNameChange?.(url.pathname.split('/').pop());
+      } catch (e) {
+        console.error('unable to decode', imageURL, ':', e);
+      }
+    }
+    if (imageURLRef.current && imageURLRef.current!.startsWith('blob://')) {
+      window.URL.revokeObjectURL(imageURLRef.current!);
+    }
+    stageRef.current?.setBackgroundImage(imageURL).then();
+    imageURLRef.current = imageURL;
+  }, [onImageNameChange]);
+
+  useEffect(() => {
+    if (!imageURL) {
+      return;
+    }
+    setBackgroundImage(imageURL);
+  }, [setBackgroundImage, imageURL]);
 
   useEffect(() => {
     if (!container) {
@@ -38,21 +98,21 @@ export default function Boxer<LABEL extends string = string>({
     }
 
     const stage = new BoxerStage<LABEL>({
-      container, width, height, defaultLabel: DEFAULT_LABEL as LABEL,
+      container, width, height, defaultLabel,
     });
     stage.on('change', debounce(() => {
-      setBoxes([...stage.getBoxes()].sort((a, b) => a._id - b._id));
+      const newBoxes = [...stage.getBoxes()].sort((a, b) => a._id - b._id);
+      setBoxes(newBoxes);
     }, 100, {
       leading:  false,
       trailing: true,
     }));
 
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-expect-error
-    window.__boxStage = stage;
-    // stage.setBackGroundImage('http://127.0.0.1:3001/demo.png').then();
-
     stageRef.current = stage;
+
+    if (imageURLRef.current) {
+      setBackgroundImage(imageURLRef.current);
+    }
 
     const handleKeyDown = (e: KeyboardEvent): void => {
       switch (e.key) {
@@ -106,7 +166,9 @@ export default function Boxer<LABEL extends string = string>({
       }
       }
     };
-    container.addEventListener('keydown', handleKeyDown);
+    if (allowKeyboard) {
+      container.addEventListener('keydown', handleKeyDown);
+    }
 
     const handleWheel = (e: WheelEvent & Partial<ILayerEvent>): void => {
       e.preventDefault();
@@ -118,27 +180,28 @@ export default function Boxer<LABEL extends string = string>({
       }
       stage.moveDelta({ x: -e.deltaX, y: -e.deltaY });
     };
-    container.addEventListener('wheel', handleWheel);
+    if (allowMouseWheel) {
+      container.addEventListener('wheel', handleWheel);
+    }
 
     return (): void => {
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-expect-error
-      delete window.__boxStage;
       stage.dispose();
       container.removeEventListener('keydown', handleKeyDown);
       container.removeEventListener('wheel', handleWheel);
+      setBoxes([]);
     };
-  }, [container, height, width, wrapperId]);
+  }, [allowKeyboard, allowMouseWheel, container, defaultLabel, height, setBackgroundImage, setBoxes, width, wrapperId]);
 
-  const handleOnFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+  const handleOnFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
     const files = e.target.files;
     if (!files || !files.length) {
       return;
     }
     const file = files[0];
-    stageRef.current?.setBackGroundImage(window.URL.createObjectURL(file));
+    setBackgroundImage(window.URL.createObjectURL(file));
+    onImageNameChange?.(file.name);
     e.target.value = '';
-  };
+  }, [onImageNameChange, setBackgroundImage]);
 
   const columns: ColumnsType<IBox<LABEL>> = useMemo(() => {
     const handleChange = (box: IBox<LABEL>, attr: keyof ClientRect, value: number): void => {
@@ -212,6 +275,10 @@ export default function Boxer<LABEL extends string = string>({
 
   // DND
   useEffect(() => {
+    if (!allowDND) {
+      return undefined;
+    }
+
     const handleDropEnter = (e: DragEvent) => {
       e.preventDefault();
       setFileOverDropZone(true);
@@ -228,7 +295,7 @@ export default function Boxer<LABEL extends string = string>({
       if (!file) {
         return;
       }
-      stageRef.current?.setBackGroundImage(window.URL.createObjectURL(file));
+      setBackgroundImage(window.URL.createObjectURL(file), file.name);
     };
 
     window.addEventListener('dragenter', handleDropEnter, true);
@@ -241,7 +308,13 @@ export default function Boxer<LABEL extends string = string>({
       window.removeEventListener('dragleave', handleDropLeave, true);
       window.removeEventListener('drop', handleDrop, true);
     };
-  }, []);
+  }, [allowDND, setBackgroundImage]);
+
+  const scroll: TableProps<IBox<LABEL>>['scroll'] = useMemo(() => ({ y: height - 53 }), [height]);
+
+  const onRow: TableProps<IBox<LABEL>>['onRow'] = useMemo(() => box => ({
+    onClick: () => box.highlight(),
+  }), []);
 
   const topBox = stageRef.current?.getTopBox();
 
@@ -252,17 +325,12 @@ export default function Boxer<LABEL extends string = string>({
     onChange:        (_, rows) => rows[0]?.highlight(),
   };
 
-  const scroll: TableProps<IBox<LABEL>>['scroll'] = useMemo(() => ({ y: height - 53 }), [height]);
-
-  const onRow: TableProps<IBox<LABEL>>['onRow'] = useMemo(() => box => ({
-    onClick: () => box.highlight(),
-  }), []);
-
   return <div id={wrapperId} className={styles.wrapper}>
     <div className={cls(styles.canvas, fileOverDropZone && styles.dnd)}>
-      <input type="file" onChange={handleOnFileChange}/>
       <div className={cls(styles.container, className)} tabIndex={0} ref={setContainer}/>
+      {fileInputVisible && <input type="file" onChange={handleOnFileChange}/>}
     </div>
+    {keysDescriptionVisible && <KeysDescription />}
     {controls &&
         <Table<IBox<LABEL>> className={styles.controls} rowKey="_id" columns={columns} dataSource={boxes}
           scroll={scroll} rowSelection={rowSelection}

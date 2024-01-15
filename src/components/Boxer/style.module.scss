@@ -3,8 +3,9 @@
   display: flex;
   justify-content: flex-start;
   align-items: flex-start;
-  flex-direction: column;
-  flex-wrap: nowrap;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px;
   width: 100%;
   .canvas {
     position: relative;
@@ -29,7 +30,6 @@
     }
   }
   .controls {
-    margin-top: 25px;
     flex: 1;
   }
 

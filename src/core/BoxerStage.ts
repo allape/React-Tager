@@ -31,8 +31,9 @@ export interface ILayerMouseEvent extends MouseEvent, ILayerEvent {
 export interface IBox<LABEL extends string = string> extends Konva.Rect {
   label: LABEL;
   transformer: Konva.Transformer;
+  boxer: BoxerStage;
 
-  dispose(): void;
+  dispose(silent?: boolean): void;
 
   normalize(): void;
 
@@ -249,7 +250,7 @@ export abstract class BoxerStageCore<LABEL extends string> extends BoxerEventEmi
     return this.backgroundLayer;
   }
 
-  public async setBackGroundImage(imageURL: string): Promise<Konva.Image> {
+  public async setBackgroundImage(imageURL: string): Promise<Konva.Image> {
     this.zoom(1);
     return new Promise<Konva.Image>((resolve, reject) => {
       const image = new Image();
@@ -482,10 +483,13 @@ export default class BoxerStage<LABEL extends string = string> extends BoxerStag
 
     box.label = this.options.defaultLabel;
     box.transformer = tr;
-    box.dispose = (): void => {
+    box.boxer = this;
+    box.dispose = (silent = false): void => {
       tr.destroy();
       box.destroy();
-      this.emit('change', this.getBoxes());
+      if (!silent) {
+        this.emit('change', this.getBoxes());
+      }
     };
     box.normalize = () => {
       const attrs = this.normalize(box.getClientRect({ relativeTo: this.boxesLayer }));
@@ -531,8 +535,9 @@ export default class BoxerStage<LABEL extends string = string> extends BoxerStag
     return boxes[indexOfNextTopBox] || null;
   }
 
-  public async setBackGroundImage(imageURL: string): Promise<Konva.Image> {
-    this.getBoxes().forEach(box => box.dispose());
-    return super.setBackGroundImage(imageURL);
+  public async setBackgroundImage(imageURL: string): Promise<Konva.Image> {
+    this.getBoxes().forEach(box => box.dispose(true));
+    this.emit('change', []);
+    return super.setBackgroundImage(imageURL);
   }
 }
