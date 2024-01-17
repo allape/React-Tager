@@ -1,40 +1,38 @@
-import { Button, Modal, Input } from 'antd';
-import React, { useCallback } from 'react';
+import { Modal } from 'antd';
+import React from 'react';
+import ScriptFormItem, { IScriptFormItemProps } from '../ScriptFormItem';
 
-export interface ILabelsFormItemProps<LABEL extends  string = string> {
-  value?: LABEL[];
-  onChange?: (value: LABEL[]) => void;
+export interface ILabelsFormItemProps<LABEL extends string = string> extends IScriptFormItemProps<LABEL[]> {
 }
 
-export default function LabelsFormItem({ value, onChange }: ILabelsFormItemProps): React.ReactElement {
-  const handleClick = useCallback(() => {
-    let labelString = value?.join('\n') || '';
-    Modal.info({
-      title:   'Edit labels',
-      content: <Input.TextArea
-        rows={10}
-        defaultValue={labelString}
-        onChange={e => {
-          labelString = e.target.value;
-        }}></Input.TextArea>,
-      okText: 'Save',
-      onOk:   (close) => {
-        const newLabels = labelString.split('\n').map(i => i.trim()).filter(Boolean);
-        Modal.confirm({
-          title:   'Labels confirmation',
-          content: <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-            {newLabels.map((label, index) => <div key={index}>{label}</div>)}
-          </div>,
-          okText:     'Confirm',
-          cancelText: 'Back to edit',
-          onOk:       () => {
-            close();
-            onChange?.(labelString.split('\n'));
-          },
-        });
-        return false;
+export function HandleParse<T extends string = string>(labelString: string): Promise<T[]> {
+  return new Promise<T[]>((resolve, reject) => {
+    const labels = labelString.split('\n').map(i => i.trim()).filter(Boolean) as T[];
+    Modal.confirm({
+      title:   'Labels confirmation',
+      content: <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+        {labels.map((label, index) => <div key={index}>{label}</div>)}
+      </div>,
+      okText:     'Confirm',
+      cancelText: 'Back to edit',
+      onOk:       () => {
+        resolve(labels);
+      },
+      onCancel: () => {
+        reject();
       },
     });
-  }, [onChange, value]);
-  return <Button onClick={handleClick}>Edit Labels</Button>;
+  });
+}
+
+export function HandleStringify(labels?: unknown[]): string {
+  return labels?.join('\n') || '';
+}
+
+export default function LabelsFormItem<LABEL extends string = string>(
+  props: ILabelsFormItemProps<LABEL>,
+): React.ReactElement {
+  return <ScriptFormItem<LABEL[]> title="Edit labels"
+    onStringify={HandleStringify}
+    onParse={HandleParse<LABEL>} {...props}>Edit Labels</ScriptFormItem>;
 }

@@ -8,6 +8,8 @@ import BoxerStage, { ClientRect, IBox, ILayerEvent } from '../../core/BoxerStage
 import KeysDescription from './KeysDescription.tsx';
 import styles from './style.module.scss';
 
+export type ClientRectWithLabel<LABEL extends string> = ClientRect & { label: LABEL };
+
 export interface IBoxerProps<LABEL extends string> {
   className?: string;
   labels: LABEL[];
@@ -21,10 +23,6 @@ export interface IBoxerProps<LABEL extends string> {
    */
   keysDescriptionVisible?: boolean;
   /**
-   * Show file select or not
-   */
-  fileInputVisible?: boolean;
-  /**
    * DND = Drag and Drop
    */
   allowDND?: boolean;
@@ -32,7 +30,10 @@ export interface IBoxerProps<LABEL extends string> {
   allowMouseWheel?: boolean;
   onChange?: (boxes: IBox<LABEL>[]) => void;
   onImageNameChange?: (imageName?: string) => void;
+  onPredicate?: (imageURL: string) => Promise<ClientRectWithLabel<LABEL>[]>;
 }
+
+export const PredicationCache: Record<string, ClientRectWithLabel<string>[]> = {};
 
 export default function Boxer<LABEL extends string = string>({
   labels,
@@ -43,12 +44,12 @@ export default function Boxer<LABEL extends string = string>({
   className,
   imageURL,
   keysDescriptionVisible,
-  fileInputVisible,
   allowDND,
   allowKeyboard,
   allowMouseWheel,
   onChange,
   onImageNameChange,
+  onPredicate,
 }: IBoxerProps<LABEL>): React.ReactElement {
   const wrapperId = useMemo(() => `BoxWrapper_${Date.now()}_${Math.floor(Math.random() * 10000)}`, []);
 
@@ -68,6 +69,9 @@ export default function Boxer<LABEL extends string = string>({
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
 
   const setBackgroundImage = useCallback((imageURL: string, imageName?: string) => {
+    // if (!imageURL || imageURLRef.current === imageURL) {
+    //   return;
+    // }
     if (imageName) {
       onImageNameChange?.(imageName);
     }  else {
@@ -83,7 +87,31 @@ export default function Boxer<LABEL extends string = string>({
     }
     stageRef.current?.setBackgroundImage(imageURL).then();
     imageURLRef.current = imageURL;
-  }, [onImageNameChange]);
+
+    const drawBoxes = (rects: ClientRectWithLabel<LABEL>[]) => {
+      rects.forEach(rect => {
+        stageRef.current?.drawBox(rect.x, rect.y, rect.width, rect.height, rect.label);
+      });
+      setBoxes(stageRef.current?.getBoxes() || []);
+      stageRef.current?.highlightNext();
+    };
+
+    if (PredicationCache[imageURL]) {
+      drawBoxes(PredicationCache[imageURL] as ClientRectWithLabel<LABEL>[]);
+    } else {
+      PredicationCache[imageURL] = [];
+      onPredicate?.(imageURL).then(rects => {
+        PredicationCache[imageURL] = rects;
+        // image has changed
+        if (imageURL !== imageURLRef.current) {
+          return;
+        }
+        drawBoxes(rects);
+      }).catch(() => {
+        delete PredicationCache[imageURL];
+      });
+    }
+  }, [onImageNameChange, onPredicate, setBoxes]);
 
   useEffect(() => {
     if (!imageURL) {
@@ -192,17 +220,6 @@ export default function Boxer<LABEL extends string = string>({
     };
   }, [allowKeyboard, allowMouseWheel, container, defaultLabel, height, setBackgroundImage, setBoxes, width, wrapperId]);
 
-  const handleOnFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
-    const files = e.target.files;
-    if (!files || !files.length) {
-      return;
-    }
-    const file = files[0];
-    setBackgroundImage(window.URL.createObjectURL(file));
-    onImageNameChange?.(file.name);
-    e.target.value = '';
-  }, [onImageNameChange, setBackgroundImage]);
-
   const columns: ColumnsType<IBox<LABEL>> = useMemo(() => {
     const handleChange = (box: IBox<LABEL>, attr: keyof ClientRect, value: number): void => {
       box.setAttr(attr, value);
@@ -275,7 +292,7 @@ export default function Boxer<LABEL extends string = string>({
 
   // DND
   useEffect(() => {
-    if (!allowDND) {
+    if (!allowDND || !container) {
       return undefined;
     }
 
@@ -298,17 +315,17 @@ export default function Boxer<LABEL extends string = string>({
       setBackgroundImage(window.URL.createObjectURL(file), file.name);
     };
 
-    window.addEventListener('dragenter', handleDropEnter, true);
-    window.addEventListener('dragover', handleDropEnter, true);
-    window.addEventListener('dragleave', handleDropLeave, true);
-    window.addEventListener('drop', handleDrop, true);
+    container.addEventListener('dragenter', handleDropEnter, true);
+    container.addEventListener('dragover', handleDropEnter, true);
+    container.addEventListener('dragleave', handleDropLeave, true);
+    container.addEventListener('drop', handleDrop, true);
     return () => {
-      window.removeEventListener('dragenter', handleDropEnter, true);
-      window.removeEventListener('dragover', handleDropEnter, true);
-      window.removeEventListener('dragleave', handleDropLeave, true);
-      window.removeEventListener('drop', handleDrop, true);
+      container.removeEventListener('dragenter', handleDropEnter, true);
+      container.removeEventListener('dragover', handleDropEnter, true);
+      container.removeEventListener('dragleave', handleDropLeave, true);
+      container.removeEventListener('drop', handleDrop, true);
     };
-  }, [allowDND, setBackgroundImage]);
+  }, [allowDND, container, setBackgroundImage]);
 
   const scroll: TableProps<IBox<LABEL>>['scroll'] = useMemo(() => ({ y: height - 53 }), [height]);
 
@@ -328,7 +345,6 @@ export default function Boxer<LABEL extends string = string>({
   return <div id={wrapperId} className={styles.wrapper}>
     <div className={cls(styles.canvas, fileOverDropZone && styles.dnd)}>
       <div className={cls(styles.container, className)} tabIndex={0} ref={setContainer}/>
-      {fileInputVisible && <input type="file" onChange={handleOnFileChange}/>}
     </div>
     {keysDescriptionVisible && <KeysDescription />}
     {controls &&

@@ -15,6 +15,14 @@ const columns: TableProps<LabeledValue>['columns'] = [
 
 const dataSource: LabeledValue[] = [
   {
+    label: 'Remove selected box',
+    value: 'Delete/Backspace',
+  },
+  {
+    label: 'Switch to next box',
+    value: 'Tab',
+  },
+  {
     label: 'Move box 1px',
     value: '→/←/↑/↓',
   },

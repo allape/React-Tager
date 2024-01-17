@@ -24,13 +24,18 @@
       border: 2px dashed lightgray;
       background-color: rgba(255, 255, 255, 0.5);
       border-radius: 4px;
+      pointer-events: none;
     }
     .container {
-      border: 1px solid red;
+      border: 1px solid lightgray;
+      &:focus {
+        border-color: red;
+      }
     }
   }
   .controls {
     flex: 1;
+    min-width: 500px;
   }
 
   :global {

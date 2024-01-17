@@ -448,12 +448,12 @@ export default class BoxerStage<LABEL extends string = string> extends BoxerStag
     });
   }
 
-  protected drawBox(x: number, y: number): IBox<LABEL> {
+  public drawBox(x: number, y: number, width = 0, height = 0, label?: LABEL): IBox<LABEL> {
     const box: IBox<LABEL> = new Konva.Rect({
-      x:         x,
-      y:         y,
-      width:     0,
-      height:    0,
+      x,
+      y,
+      width,
+      height,
       draggable: true,
     }) as IBox<LABEL>;
     box.on('click', () => box.highlight());
@@ -481,7 +481,7 @@ export default class BoxerStage<LABEL extends string = string> extends BoxerStag
     tr.on('dragstart', () => box.highlight());
     this.boxesLayer.add(tr);
 
-    box.label = this.options.defaultLabel;
+    box.label = label || this.options.defaultLabel;
     box.transformer = tr;
     box.boxer = this;
     box.dispose = (silent = false): void => {

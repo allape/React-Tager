@@ -1,8 +1,9 @@
-import { Button, Divider, Form, InputNumber, message, Radio, Select, Switch } from 'antd';
+import { Button, Divider, Form, InputNumber, message, Popconfirm, Radio, Select, Switch } from 'antd';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './App.module.scss';
 import Boxer, { IBoxerProps } from './components/Boxer';
 import LabelsFormItem from './components/LabelsFormItem';
+import ScriptFormItem from './components/ScriptFormItem';
 import { IBox } from './core/BoxerStage.ts';
 import { OutputType, OutputTypeMap, OutputTypes } from './output';
 
@@ -92,6 +93,8 @@ const LABELS: string[] = [
 export type LabelType = typeof LABELS[number];
 
 export interface IProps extends IBoxerProps<LabelType> {
+  _predicateScript?: string;
+  _allowPredication?: boolean;
   _labelOptions?: ILabeledValue[];
   _outputType?: OutputType;
 }
@@ -102,13 +105,31 @@ export const DefaultBoxProps: IProps = {
   width:                  500,
   height:                 500,
   controls:               true,
-  imageURL:               'http://127.0.0.1:3001/demo.webp',
-  fileInputVisible:       true,
+  imageURL:               'http://127.0.0.1:3001/demo.jpg',
   allowDND:               true,
   allowKeyboard:          true,
   allowMouseWheel:        true,
   keysDescriptionVisible: true,
   _outputType:            'YOLO_TXT',
+  _allowPredication:      true,
+  _predicateScript:       `
+    return (async () => {
+      const blob = await fetch(imageURL).then(res => res.blob());
+      const formData = new FormData();
+      formData.set('file', blob);
+      const res = await fetch('http://127.0.0.1:8000/predicate', { 
+        method: 'post',
+        body: formData,
+      }).then(res => res.json());
+      return res.boxes.filter(i => i[1] >= 0.3).map(rect => ({ 
+        label: labels[rect[0]], 
+        x: rect[2][0], 
+        y: rect[2][1], 
+        width: rect[3][0] - rect[2][0], 
+        height: rect[3][1] - rect[2][1] 
+      }));
+    })()
+  `,
 };
 
 export function normalizeProps(props: IProps): IProps {
@@ -122,6 +143,9 @@ export const CACHE_KEY = `CACHED_BOXER_PROPS_${BOXER_VERSION}`;
 export default function App(): React.ReactElement {
   const boxesRef = useRef<IBox<LabelType>[]>([]);
   const imageFileNameRef = useRef<string>('');
+  const fileSelectorRef = useRef<HTMLInputElement>(null);
+
+  const [loading, setLoading] = useState<boolean>(false);
   const [props, setProps] = useState<IProps | undefined>(undefined);
 
   const [form] = Form.useForm<IProps>();
@@ -164,7 +188,7 @@ export default function App(): React.ReactElement {
   }, []);
 
   const handleImageNameChange = useCallback((imageName?: string) => {
-    if (!imageName) {
+    if (!imageName || !imageName.includes('.')) {
       imageFileNameRef.current = 'image';
       return;
     }
@@ -172,25 +196,58 @@ export default function App(): React.ReactElement {
   }, []);
 
   const handleDownload = useCallback((consoleOnly = false) => {
-    if (boxesRef.current.length === 0) {
-      message.warning('No box found').then();
+    try {
+      if (boxesRef.current.length === 0) {
+        message.warning('No box found').then();
+        return;
+      }
+      setLoading(true);
+      const values = form.getFieldsValue();
+      const parser = OutputTypeMap[values._outputType || 'VOC_XML'];
+      const output = parser.parse(values.labels, boxesRef.current, imageFileNameRef.current);
+      console.log(output);
+      if (consoleOnly) {
+        return;
+      }
+      const blob = new Blob([output], { type: 'text/plain;charset=utf-8' });
+      const imageFileName = imageFileNameRef.current.split('.').slice(0, -1).join('.');
+      const fileName = `${imageFileName}${parser.ext}`;
+      const link = document.createElement('a');
+      link.href = window.URL.createObjectURL(blob);
+      link.download = fileName;
+      link.click();
+    } finally {
+      setLoading(false);
+    }
+  }, [form]);
+
+  const handleOnFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>): void => {
+    const files = e.target.files;
+    if (!files || !files.length) {
       return;
     }
-    const values = form.getFieldsValue();
-    const parser = OutputTypeMap[values._outputType || 'VOC_XML'];
-    const output = parser.parse(values.labels, boxesRef.current, imageFileNameRef.current);
-    console.log(output);
-    if (consoleOnly) {
-      return;
+    const file = files[0];
+    setProps(p => ({
+      ...p!,
+      imageURL: window.URL.createObjectURL(file),
+    }));
+    imageFileNameRef.current = file.name;
+    e.target.value = '';
+  }, []);
+
+  const handlePredicate = useCallback<Exclude<IProps['onPredicate'], undefined>>(async (imageURL: string) => {
+    try {
+      const values = form.getFieldsValue();
+      if (!values._allowPredication) return [];
+      const predicateScript = values._predicateScript;
+      if (!predicateScript) {
+        return [];
+      }
+      return await (new Function('imageURL', 'labels', predicateScript))(imageURL, values.labels);
+    } catch (e) {
+      console.log('unable to predicate:', e, imageURL);
+      throw e;
     }
-    const blob = new Blob([output], { type: 'text/plain;charset=utf-8' });
-    const imageFileName = imageFileNameRef.current.split('.').slice(0, -1).join('.');
-    const fileName = `${imageFileName}${parser.ext}`;
-    const link = document.createElement('a');
-    link.href = window.URL.createObjectURL(blob);
-    link.download = fileName;
-    link.click();
-    link.remove();
   }, [form]);
 
   return (
@@ -198,7 +255,17 @@ export default function App(): React.ReactElement {
       <div className={styles.config}>
         <Form form={form} onValuesChange={handleValueChanged} layout="inline">
           <Form.Item>
-            <Button onClick={handleReset} danger>Reset</Button>
+            <Popconfirm
+              title="Reset now?"
+              onConfirm={handleReset}
+              okText="Reset"
+              cancelText="Not now"
+              okButtonProps={{ danger: true }}>
+              <Button danger>Reset</Button>
+            </Popconfirm>
+          </Form.Item>
+          <Form.Item label="Predicate Script" name="_predicateScript">
+            <ScriptFormItem />
           </Form.Item>
           <Form.Item label="Labels" name="labels">
             <LabelsFormItem/>
@@ -212,11 +279,11 @@ export default function App(): React.ReactElement {
           <Form.Item label="Height" name="height">
             <InputNumber min={480} precision={0} step={10}/>
           </Form.Item>
-          <Divider />
-          <Form.Item label="Form" name="controls" valuePropName="checked">
+          <Divider/>
+          <Form.Item label="Predication" name="_allowPredication" valuePropName="checked">
             <Switch/>
           </Form.Item>
-          <Form.Item label="File Selector" name="fileInputVisible" valuePropName="checked">
+          <Form.Item label="Form" name="controls" valuePropName="checked">
             <Switch/>
           </Form.Item>
           <Form.Item label="Drag and Drop" name="allowDND" valuePropName="checked">
@@ -225,26 +292,41 @@ export default function App(): React.ReactElement {
           <Form.Item label="Keyboard" name="allowKeyboard" valuePropName="checked">
             <Switch/>
           </Form.Item>
-          <Form.Item label="Mouse wheel" name="allowMouseWheel" valuePropName="checked">
+          <Form.Item label="Mouse Wheel" name="allowMouseWheel" valuePropName="checked">
             <Switch/>
           </Form.Item>
           <Form.Item label="Keys Description" name="keysDescriptionVisible" valuePropName="checked">
             <Switch/>
           </Form.Item>
-          <Divider />
+          <Divider/>
+          <Form.Item>
+            <Button onClick={() => fileSelectorRef.current?.click()}>Open Image</Button>
+          </Form.Item>
           <Form.Item label="Output as" name="_outputType">
             <Radio.Group options={OutputTypes}/>
           </Form.Item>
           <Form.Item>
-            <Button onClick={() => handleDownload()} onContextMenu={(e) => {
-              e.preventDefault();
-              handleDownload(true);
-            }}>Download</Button>
+            <Button 
+              loading={loading}
+              onClick={() => handleDownload()} 
+              onContextMenu={(e) => {
+                e.preventDefault();
+                handleDownload(true);
+              }}>
+              Download
+            </Button>
           </Form.Item>
         </Form>
+        <input ref={fileSelectorRef} className={styles.fileSelector} type="file" onChange={handleOnFileChange}/>
       </div>
-      {props && <div className={styles.container}><Boxer {...props} onChange={handleBoxesChange}
-        onImageNameChange={handleImageNameChange}/></div>}
+      {props && (<div className={styles.container}>
+        <Boxer
+          {...props}
+          onChange={handleBoxesChange}
+          onImageNameChange={handleImageNameChange}
+          onPredicate={handlePredicate}
+        />
+      </div>)}
     </div>
   );
 }
