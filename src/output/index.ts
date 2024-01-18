@@ -1,8 +1,8 @@
 import { IBox } from '../core/BoxerStage.ts';
 
-export type OutputType = 'VOC_XML' | 'YOLO_TXT';
+export type OutputType = 'VOC_XML' | 'YOLO_TXT' | 'LXYWH_TXT';
 
-export type ParseFunc = (labels: string[],boxes: IBox[], imageName: string) => string;
+export type ParseFunc = (labels: string[], boxes: IBox[], imageName: string) => string;
 
 export interface IOutputType extends ILabeledValue<OutputType> {
   ext: string;
@@ -41,7 +41,7 @@ function convert2YOLO(box: IBox): [number, number, number, number] {
 
 export const OutputTypes: IOutputType[] = [
   {
-    label: 'VOC annotation XML',
+    label: 'VOC XML',
     value: 'VOC_XML',
     ext:   '.xml',
     parse: (_: string[], boxes: IBox[], imageName: string) => {
@@ -98,7 +98,7 @@ export const OutputTypes: IOutputType[] = [
     },
   },
   {
-    label: 'YOLO annotation text',
+    label: 'YOLO text',
     value: 'YOLO_TXT',
     ext:   '.txt',
     parse: (labels: string[], boxes) => {
@@ -108,6 +108,19 @@ export const OutputTypes: IOutputType[] = [
       return boxes.map((box) => {
         const [x, y, w, h] = convert2YOLO(box);
         return `${labels.indexOf(box.label)} ${x} ${y} ${w} ${h}`;
+      }).join('\n');
+    },
+  },
+  {
+    label: 'L,X,Y,W,H text',
+    value: 'LXYWH_TXT',
+    ext:   '.txt',
+    parse: (labels: string[], boxes) => {
+      if (!boxes.length) {
+        return '';
+      }
+      return boxes.map((box) => {
+        return `${labels.indexOf(box.label)},${box.x()},${box.y()},${box.width()},${box.height()}`;
       }).join('\n');
     },
   },

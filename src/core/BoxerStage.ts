@@ -32,6 +32,7 @@ export interface IBox<LABEL extends string = string> extends Konva.Rect {
   label: LABEL;
   transformer: Konva.Transformer;
   boxer: BoxerStage;
+  yolo: string;
 
   dispose(silent?: boolean): void;
 
@@ -236,6 +237,10 @@ export abstract class BoxerStageCore<LABEL extends string> extends BoxerEventEmi
 
   public setDefaultLabel(label: LABEL) {
     this.options.defaultLabel = label;
+  }
+
+  public getContainer(): HTMLDivElement {
+    return this.options.container;
   }
 
   public getStage(): Konva.Stage {
@@ -484,6 +489,7 @@ export default class BoxerStage<LABEL extends string = string> extends BoxerStag
     box.label = label || this.options.defaultLabel;
     box.transformer = tr;
     box.boxer = this;
+    box.yolo = 'yolo~';
     box.dispose = (silent = false): void => {
       tr.destroy();
       box.destroy();
@@ -509,8 +515,17 @@ export default class BoxerStage<LABEL extends string = string> extends BoxerStag
     return box;
   }
 
-  public getBoxes(): IBox<LABEL>[] {
-    return this.boxesLayer.getChildren(node => node instanceof Konva.Rect) as IBox<LABEL>[];
+  public getBoxes(order?: keyof Pick<IBox<LABEL>, '_id'>, by: 'desc' | 'asc' = 'asc'): IBox<LABEL>[] {
+    const boxes = this.boxesLayer.getChildren(node => node instanceof Konva.Rect && 'yolo' in node) as IBox<LABEL>[];
+    if (order) {
+      const isAsc = by === 'asc';
+      return [...boxes].sort((a, b) =>
+        isAsc
+          ? ((a[order] as number) - (b[order] as number))
+          : ((b[order] as number) - (a[order] as number)),
+      );
+    }
+    return [...boxes];
   }
 
   public getTopBox(): IBox<LABEL> | null {
@@ -518,21 +533,24 @@ export default class BoxerStage<LABEL extends string = string> extends BoxerStag
     return boxes[0] || null;
   }
 
-  public highlightNext(): IBox<LABEL> | null {
-    const boxes = this.getBoxes();
+  public highlight(direction: 'next' | 'prev' = 'next'): IBox<LABEL> | null {
+    this.getContainer().focus();
+    const boxes = this.getBoxes('_id');
     if (boxes.length === 0) {
       return null;
     }
-    let indexOfNextTopBox = 0;
+    let boxIndex = 0;
     const topBox = this.getTopBox();
     if (topBox) {
-      indexOfNextTopBox = boxes.indexOf(topBox) + 1;
-      if (indexOfNextTopBox >= boxes.length) {
-        indexOfNextTopBox = 0;
+      boxIndex = boxes.indexOf(topBox) + (direction === 'next' ? 1 : -1);
+      if (boxIndex >= boxes.length) {
+        boxIndex = 0;
+      } else if (boxIndex < 0) {
+        boxIndex = boxes.length - 1;
       }
     }
-    boxes[indexOfNextTopBox]?.highlight();
-    return boxes[indexOfNextTopBox] || null;
+    boxes[boxIndex]?.highlight();
+    return boxes[boxIndex] || null;
   }
 
   public async setBackgroundImage(imageURL: string): Promise<Konva.Image> {
